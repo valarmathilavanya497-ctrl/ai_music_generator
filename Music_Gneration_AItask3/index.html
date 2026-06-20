@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MusicAI — Generate Music with Deep Learning</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Tokens ─────────────────────────────────────────────────────────────── */
+    :root {
+      --bg:        #0A0A0F;
+      --surface:   #12121A;
+      --surface2:  #1A1A26;
+      --border:    #2A2A3E;
+      --accent:    #7C5CFC;
+      --accent2:   #C084FC;
+      --green:     #34D399;
+      --amber:     #FBBF24;
+      --red:       #F87171;
+      --text:      #E8E8F0;
+      --muted:     #6B6B8A;
+      --font-disp: 'Space Grotesk', sans-serif;
+      --font-mono: 'Space Mono', monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-disp);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Noise overlay for depth ─────────────────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+      pointer-events: none; z-index: 0;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────────────────── */
+    .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+
+    /* ── Header ─────────────────────────────────────────────────────────────── */
+    header {
+      padding: 20px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .nav { display: flex; align-items: center; justify-content: space-between; }
+    .logo {
+      font-size: 1.25rem; font-weight: 700; letter-spacing: -0.03em;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text; color: transparent;
+    }
+    .logo span { font-weight: 300; }
+    .nav-tag {
+      font-family: var(--font-mono); font-size: 0.7rem;
+      color: var(--muted); border: 1px solid var(--border);
+      padding: 4px 10px; border-radius: 100px; letter-spacing: 0.08em;
+    }
+
+    /* ── Hero ───────────────────────────────────────────────────────────────── */
+    .hero {
+      padding: 72px 0 56px;
+      text-align: center;
+    }
+    .hero-eyebrow {
+      font-family: var(--font-mono); font-size: 0.72rem;
+      color: var(--accent); letter-spacing: 0.15em; text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+    .hero h1 {
+      font-size: clamp(2.4rem, 5vw, 4.2rem);
+      font-weight: 700; line-height: 1.1; letter-spacing: -0.04em;
+      margin-bottom: 20px;
+    }
+    .hero h1 em { font-style: normal; color: var(--accent2); }
+    .hero p {
+      font-size: 1.05rem; color: var(--muted); max-width: 560px;
+      margin: 0 auto 40px; line-height: 1.7;
+    }
+
+    /* Waveform animation */
+    .waveform {
+      display: flex; align-items: center; justify-content: center;
+      gap: 4px; height: 48px; margin-bottom: 48px;
+    }
+    .waveform .bar {
+      width: 4px; border-radius: 2px;
+      background: linear-gradient(to top, var(--accent), var(--accent2));
+      animation: wave 1.2s ease-in-out infinite;
+    }
+    .waveform .bar:nth-child(2n)   { animation-delay: 0.1s; }
+    .waveform .bar:nth-child(3n)   { animation-delay: 0.2s; }
+    .waveform .bar:nth-child(4n)   { animation-delay: 0.35s; }
+    .waveform .bar:nth-child(5n)   { animation-delay: 0.5s; }
+    @keyframes wave {
+      0%, 100% { height: 8px;  opacity: 0.4; }
+      50%       { height: 40px; opacity: 1;   }
+    }
+
+    /* ── Pipeline steps ─────────────────────────────────────────────────────── */
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      margin-bottom: 56px;
+    }
+    .step {
+      background: var(--surface);
+      padding: 28px 20px;
+      transition: background 0.2s;
+    }
+    .step:hover { background: var(--surface2); }
+    .step-num {
+      font-family: var(--font-mono); font-size: 0.65rem;
+      color: var(--accent); letter-spacing: 0.1em;
+      margin-bottom: 12px;
+    }
+    .step-icon { font-size: 1.6rem; margin-bottom: 10px; }
+    .step h3 { font-size: 0.9rem; font-weight: 600; margin-bottom: 6px; }
+    .step p { font-size: 0.78rem; color: var(--muted); line-height: 1.55; }
+
+    /* ── Main panel ─────────────────────────────────────────────────────────── */
+    .panel-grid {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 20px;
+      margin-bottom: 32px;
+    }
+    @media (max-width: 800px) {
+      .panel-grid { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+    }
+    .panel-title {
+      font-size: 0.78rem; font-weight: 600; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--muted);
+      margin-bottom: 24px; padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* ── Controls ───────────────────────────────────────────────────────────── */
+    .field { margin-bottom: 20px; }
+    .field label {
+      display: block; font-size: 0.8rem; font-weight: 500;
+      color: var(--muted); margin-bottom: 8px;
+    }
+    .field label span { color: var(--accent); margin-left: 6px; font-family: var(--font-mono); font-size: 0.7rem; }
+
+    select, input[type="range"] {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 10px;
+      font-family: var(--font-disp);
+      font-size: 0.9rem;
+      padding: 10px 14px;
+      outline: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      appearance: none;
+      transition: border-color 0.15s;
+    }
+    select:focus, input[type="range"]:focus { border-color: var(--accent); }
+    select { cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B6B8A' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+
+    input[type="range"] {
+      padding: 6px 0; height: 36px;
+      -webkit-appearance: none; -moz-appearance: none; appearance: none; background: transparent; border: none;
+    }
+    input[type="range"]::-webkit-slider-runnable-track {
+      height: 4px; border-radius: 2px;
+      background: var(--border);
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none; width: 18px; height: 18px;
+      border-radius: 50%; background: var(--accent);
+      margin-top: -7px; cursor: pointer;
+      box-shadow: 0 0 0 3px rgba(124,92,252,0.2);
+    }
+
+    .btn {
+      width: 100%; padding: 14px;
+      background: linear-gradient(135deg, var(--accent), #5B21B6);
+      color: #fff; border: none; border-radius: 12px;
+      font-family: var(--font-disp); font-size: 0.95rem; font-weight: 600;
+      cursor: pointer; transition: opacity 0.15s, transform 0.1s;
+      letter-spacing: 0.01em;
+    }
+    .btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    .btn-sec {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      margin-top: 10px;
+    }
+    .btn-sec:hover { border-color: var(--accent); opacity: 1; }
+
+    /* ── Output panel ───────────────────────────────────────────────────────── */
+    .stats-row {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 12px; margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 12px; padding: 16px;
+    }
+    .stat-card .val {
+      font-family: var(--font-mono); font-size: 1.5rem;
+      font-weight: 700; color: var(--accent2);
+    }
+    .stat-card .lbl {
+      font-size: 0.72rem; color: var(--muted); margin-top: 4px;
+    }
+
+    /* Piano roll */
+    .piano-roll-wrap {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    .piano-roll-header {
+      padding: 10px 16px;
+      font-size: 0.72rem; color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      font-family: var(--font-mono);
+    }
+    #pianoRoll {
+      display: block; width: 100%;
+      height: 180px;
+    }
+
+    /* Note list */
+    .note-list-wrap {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 12px; overflow: hidden;
+    }
+    .note-list-header {
+      display: grid;
+      grid-template-columns: 60px 80px 80px 80px 1fr;
+      padding: 8px 16px;
+      font-size: 0.7rem; color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      font-family: var(--font-mono);
+    }
+    .note-list-body {
+      max-height: 200px; overflow-y: auto;
+    }
+    .note-row {
+      display: grid;
+      grid-template-columns: 60px 80px 80px 80px 1fr;
+      padding: 7px 16px;
+      font-size: 0.75rem; font-family: var(--font-mono);
+      border-bottom: 1px solid rgba(42,42,62,0.5);
+      transition: background 0.1s;
+    }
+    .note-row:hover { background: rgba(124,92,252,0.06); }
+    .note-row .pitch { color: var(--accent2); }
+    .note-row .vel { color: var(--green); }
+
+    /* ── Preprocessing modal info ───────────────────────────────────────────── */
+    .info-box {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin-top: 20px;
+      font-size: 0.82rem;
+      line-height: 1.7;
+    }
+    .info-box h4 { font-size: 0.8rem; color: var(--accent2); margin-bottom: 10px; }
+    .info-box ul { padding-left: 18px; }
+    .info-box li { color: var(--muted); margin-bottom: 4px; }
+    .info-box li strong { color: var(--text); }
+
+    /* ── Status bar ─────────────────────────────────────────────────────────── */
+    .status-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 0.82rem;
+      margin-bottom: 20px;
+      transition: all 0.3s;
+      opacity: 0;
+    }
+    .status-bar.show { opacity: 1; }
+    .status-bar.loading { background: rgba(124,92,252,0.1); border: 1px solid rgba(124,92,252,0.3); color: var(--accent2); }
+    .status-bar.success { background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.3); color: var(--green); }
+    .status-bar.error   { background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); color: var(--red); }
+
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    }
+    .loading .dot { background: var(--accent); animation: pulse 1s infinite; }
+    .success .dot { background: var(--green); }
+    .error   .dot { background: var(--red); }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    /* Spinner */
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(124,92,252,0.3);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Model info card ─────────────────────────────────────────────────────── */
+    .model-card {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 12px; margin-top: 24px;
+    }
+    .model-block {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px;
+    }
+    .model-block h4 { font-size: 0.75rem; color: var(--accent); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.07em; }
+    .model-row { display: flex; justify-content: space-between; font-size: 0.78rem; margin-bottom: 6px; }
+    .model-row .k { color: var(--muted); }
+    .model-row .v { color: var(--text); font-family: var(--font-mono); }
+
+    /* ── Playback ───────────────────────────────────────────────────────────── */
+    .playback-bar {
+      display: flex; align-items: center; gap: 14px;
+      padding: 14px 18px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 12px; margin-bottom: 20px;
+    }
+    .play-btn {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: var(--accent); border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; transition: transform 0.1s;
+    }
+    .play-btn:hover { transform: scale(1.08); }
+    .play-btn svg { fill: #fff; }
+
+    .progress-wrap { flex: 1; }
+    .progress-track {
+      height: 4px; background: var(--border); border-radius: 2px;
+      position: relative; overflow: hidden;
+    }
+    #progressFill {
+      height: 100%; width: 0;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 2px; transition: width 0.1s linear;
+    }
+    .time-labels { display: flex; justify-content: space-between; margin-top: 4px; font-size: 0.65rem; color: var(--muted); font-family: var(--font-mono); }
+
+    /* ── Footer ─────────────────────────────────────────────────────────────── */
+    footer {
+      padding: 32px 0; border-top: 1px solid var(--border);
+      text-align: center; font-size: 0.78rem; color: var(--muted);
+      margin-top: 56px;
+    }
+
+    /* scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* placeholder */
+    .empty-state {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; height: 100%; min-height: 260px;
+      color: var(--muted); gap: 12px;
+    }
+    .empty-state svg { opacity: 0.2; }
+    .empty-state p { font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="container">
+    <nav class="nav">
+      <div class="logo">Music<span>AI</span></div>
+      <div class="nav-tag">LSTM · GAN · MIDI</div>
+    </nav>
+  </div>
+</header>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-eyebrow">Deep Learning Music Generation</div>
+    <h1>Compose with<br><em>Artificial Intelligence</em></h1>
+    <p>Train neural networks on MIDI datasets, generate original melodies, and export them as audio — all powered by LSTM and GAN architectures.</p>
+
+    <div class="waveform" id="waveform"></div>
+
+    <!-- Pipeline -->
+    <div class="pipeline">
+      <div class="step">
+        <div class="step-num">STEP 01</div>
+        <div class="step-icon">🎹</div>
+        <h3>Collect MIDI Data</h3>
+        <p>Classical, jazz, blues datasets — thousands of note sequences for training.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">STEP 02</div>
+        <div class="step-icon">⚙️</div>
+        <h3>Preprocess</h3>
+        <p>Convert MIDI to note sequences using music21. Normalize, quantize, encode.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">STEP 03</div>
+        <div class="step-icon">🧠</div>
+        <h3>Train Model</h3>
+        <p>LSTM or GAN learns patterns — pitch, rhythm, velocity, transitions.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">STEP 04</div>
+        <div class="step-icon">🎵</div>
+        <h3>Generate &amp; Export</h3>
+        <p>Generate novel sequences and convert back to MIDI / audio files.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Main interface -->
+<main>
+  <div class="container">
+    <div id="statusBar" class="status-bar">
+      <div class="dot"></div>
+      <span id="statusMsg">Ready</span>
+    </div>
+
+    <div class="panel-grid">
+      <!-- Controls -->
+      <aside class="panel">
+        <div class="panel-title">🎛 Generation Controls</div>
+
+        <div class="field">
+          <label>Genre <span id="genreTag">—</span></label>
+          <select id="genre">
+            <option value="">Loading genres…</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Notes to generate <span id="lengthVal">32</span></label>
+          <input type="range" id="noteLength" min="8" max="128" value="32" step="4" />
+        </div>
+
+        <div class="field">
+          <label>Root note (MIDI) <span id="rootVal">60 — C4</span></label>
+          <input type="range" id="rootNote" min="48" max="72" value="60" step="1" />
+        </div>
+
+        <button class="btn" id="generateBtn" onclick="generate()">⚡ Generate Melody</button>
+        <button class="btn btn-sec" onclick="loadPreprocessInfo()">🔬 Show Preprocessing Info</button>
+        <button class="btn btn-sec" onclick="loadModelInfo()">🧠 View Model Architecture</button>
+
+        <div id="preprocessInfo"></div>
+      </aside>
+
+      <!-- Output -->
+      <section class="panel" id="outputPanel">
+        <div class="panel-title">🎼 Output</div>
+
+        <div id="emptyState" class="empty-state">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+          </svg>
+          <p>Configure settings and hit Generate to create music</p>
+        </div>
+
+        <div id="resultContent" style="display:none">
+          <div class="stats-row">
+            <div class="stat-card"><div class="val" id="sTempo">—</div><div class="lbl">BPM Tempo</div></div>
+            <div class="stat-card"><div class="val" id="sNotes">—</div><div class="lbl">Total Notes</div></div>
+            <div class="stat-card"><div class="val" id="sDur">—</div><div class="lbl">Duration (s)</div></div>
+          </div>
+
+          <!-- Playback -->
+          <div class="playback-bar">
+            <button class="play-btn" id="playBtn" onclick="togglePlay()">
+              <svg id="playIcon" width="16" height="16" viewBox="0 0 24 24"><path d="M5 3l14 9-14 9V3z"/></svg>
+            </button>
+            <div class="progress-wrap">
+              <div class="progress-track"><div id="progressFill"></div></div>
+              <div class="time-labels"><span id="timeCurrent">0:00</span><span id="timeTotal">0:00</span></div>
+            </div>
+            <button class="btn btn-sec" style="width:auto;padding:8px 16px;font-size:0.8rem;margin:0;" onclick="downloadMidi()">⬇ MIDI</button>
+          </div>
+
+          <!-- Piano roll -->
+          <div class="piano-roll-wrap">
+            <div class="piano-roll-header">PIANO ROLL — pitch vs. time</div>
+            <canvas id="pianoRoll"></canvas>
+          </div>
+
+          <!-- Note table -->
+          <div class="note-list-wrap">
+            <div class="note-list-header">
+              <span>#</span><span>Note</span><span>Start</span><span>Dur</span><span>Velocity</span>
+            </div>
+            <div class="note-list-body" id="noteList"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Model info -->
+    <div id="modelPanel" style="display:none">
+      <div class="panel">
+        <div class="panel-title">🧠 Model Architecture</div>
+        <div id="modelContent"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="container">
+    <p>MusicAI — Built with Flask + Vanilla JS · LSTM &amp; GAN architectures · MIDI generation</p>
+  </div>
+</footer>
+
+<script>
+  const API = 'http://localhost:5000/api';
+  let lastResult = null;
+  let audioCtx = null;
+  let isPlaying = false;
+  let playTimeout = null;
+  let playStart = 0;
+  let totalDur = 0;
+  let animFrame = null;
+  let midiB64 = null;
+
+  // ── Waveform bars ─────────────────────────────────────────────────────────
+  const wf = document.getElementById('waveform');
+  for (let i = 0; i < 28; i++) {
+    const b = document.createElement('div');
+    b.className = 'bar';
+    b.style.height = Math.random() * 32 + 8 + 'px';
+    wf.appendChild(b);
+  }
+
+  // ── Range live labels ─────────────────────────────────────────────────────
+  const NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  document.getElementById('noteLength').addEventListener('input', e => {
+    document.getElementById('lengthVal').textContent = e.target.value;
+  });
+  document.getElementById('rootNote').addEventListener('input', e => {
+    const v = parseInt(e.target.value);
+    const name = NOTE_NAMES[v % 12] + Math.floor(v / 12 - 1);
+    document.getElementById('rootVal').textContent = `${v} — ${name}`;
+  });
+
+  // ── Status helper ─────────────────────────────────────────────────────────
+  function setStatus(msg, type) {
+    const bar = document.getElementById('statusBar');
+    const msgEl = document.getElementById('statusMsg');
+    bar.className = 'status-bar show ' + type;
+    const dot = bar.querySelector('.dot');
+    const spinner = bar.querySelector('.spinner');
+    if (spinner) spinner.remove();
+    if (type === 'loading') {
+      const s = document.createElement('div'); s.className = 'spinner';
+      bar.insertBefore(s, dot); dot.style.display = 'none';
+    } else {
+      dot.style.display = '';
+    }
+    msgEl.textContent = msg;
+  }
+
+  // ── Load genres ───────────────────────────────────────────────────────────
+  async function loadGenres() {
+    try {
+      const res = await fetch(`${API}/genres`);
+      const data = await res.json();
+      const sel = document.getElementById('genre');
+      sel.innerHTML = data.genres.map(g =>
+        `<option value="${g.id}">${g.name} — ${g.description}</option>`
+      ).join('');
+      updateGenreTag();
+    } catch {
+      document.getElementById('genre').innerHTML = '<option value="classical">Classical (offline fallback)</option>';
+    }
+  }
+
+  function updateGenreTag() {
+    const v = document.getElementById('genre').value;
+    document.getElementById('genreTag').textContent = v ? v.toUpperCase() : '';
+  }
+  document.getElementById('genre').addEventListener('change', updateGenreTag);
+
+  // ── Generate ──────────────────────────────────────────────────────────────
+  async function generate() {
+    const btn = document.getElementById('generateBtn');
+    btn.disabled = true;
+    setStatus('Generating melody…', 'loading');
+
+    const body = {
+      genre: document.getElementById('genre').value,
+      length: parseInt(document.getElementById('noteLength').value),
+      root_note: parseInt(document.getElementById('rootNote').value),
+    };
+
+    try {
+      const res = await fetch(`${API}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Server error');
+
+      lastResult = data;
+      midiB64 = data.midi_base64;
+      renderResult(data);
+      setStatus(`✓ Generated ${data.total_notes} notes at ${data.tempo} BPM (${data.genre})`, 'success');
+    } catch (err) {
+      setStatus('Error: ' + err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ── Render result ─────────────────────────────────────────────────────────
+  function renderResult(data) {
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('resultContent').style.display = '';
+
+    document.getElementById('sTempo').textContent = data.tempo;
+    document.getElementById('sNotes').textContent = data.total_notes;
+    document.getElementById('sDur').textContent = data.total_duration_seconds.toFixed(1);
+
+    totalDur = data.total_duration_seconds;
+    document.getElementById('timeTotal').textContent = formatTime(totalDur);
+
+    drawPianoRoll(data.sequence);
+    renderNoteList(data.sequence);
+  }
+
+  // ── Piano roll canvas ─────────────────────────────────────────────────────
+  function drawPianoRoll(sequence) {
+    const canvas = document.getElementById('pianoRoll');
+    const parent = canvas.parentElement;
+    canvas.width = parent.clientWidth;
+    canvas.height = 180;
+    const ctx = canvas.getContext('2d');
+
+    const pitches = sequence.map(n => n.pitch);
+    const minP = Math.min(...pitches) - 2;
+    const maxP = Math.max(...pitches) + 2;
+    const totalT = sequence[sequence.length - 1]?.end_time || 1;
+    const W = canvas.width, H = canvas.height;
+
+    ctx.fillStyle = '#12121A';
+    ctx.fillRect(0, 0, W, H);
+
+    // Horizontal grid lines
+    ctx.strokeStyle = '#2A2A3E';
+    ctx.lineWidth = 1;
+    for (let p = minP; p <= maxP; p++) {
+      const y = H - ((p - minP) / (maxP - minP)) * H;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+
+    // Notes
+    sequence.forEach((note, i) => {
+      const x = (note.start_time / totalT) * W;
+      const w = Math.max(2, ((note.end_time - note.start_time) / totalT) * W - 1);
+      const y = H - ((note.pitch - minP) / (maxP - minP)) * H - 5;
+      const h = Math.max(4, H / (maxP - minP) - 1);
+
+      const alpha = 0.5 + (note.velocity / 127) * 0.5;
+      const hue = 260 + (i / sequence.length) * 60;
+      ctx.fillStyle = `hsla(${hue}, 80%, 70%, ${alpha})`;
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 2);
+      ctx.fill();
+    });
+  }
+
+  // ── Note list ─────────────────────────────────────────────────────────────
+  function renderNoteList(sequence) {
+    const list = document.getElementById('noteList');
+    list.innerHTML = sequence.slice(0, 80).map((n, i) => `
+      <div class="note-row">
+        <span>${i + 1}</span>
+        <span class="pitch">${n.note_name}</span>
+        <span>${n.start_time.toFixed(2)}s</span>
+        <span>${n.duration}b</span>
+        <span class="vel">${n.velocity}</span>
+      </div>
+    `).join('');
+  }
+
+  // ── Web Audio playback ────────────────────────────────────────────────────
+  function togglePlay() {
+    if (!lastResult) return;
+    isPlaying ? stopPlay() : startPlay();
+  }
+
+  function startPlay() {
+    if (!lastResult) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    isPlaying = true;
+    playStart = audioCtx.currentTime;
+
+    document.getElementById('playIcon').innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
+
+    const secondsPerBeat = 60 / lastResult.tempo;
+
+    lastResult.sequence.forEach(note => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain); gain.connect(audioCtx.destination);
+
+      osc.type = 'sine';
+      osc.frequency.value = 440 * Math.pow(2, (note.pitch - 69) / 12);
+
+      const start = playStart + note.start_time;
+      const dur = note.duration * secondsPerBeat * 0.85;
+      const vel = note.velocity / 127 * 0.25;
+
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(vel, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+
+      osc.start(start);
+      osc.stop(start + dur + 0.05);
+    });
+
+    animFrame = requestAnimationFrame(updateProgress);
+    playTimeout = setTimeout(stopPlay, totalDur * 1000 + 200);
+  }
+
+  function stopPlay() {
+    isPlaying = false;
+    if (audioCtx) { audioCtx.close(); audioCtx = null; }
+    clearTimeout(playTimeout);
+    cancelAnimationFrame(animFrame);
+    document.getElementById('playIcon').innerHTML = '<path d="M5 3l14 9-14 9V3z"/>';
+    document.getElementById('progressFill').style.width = '0%';
+    document.getElementById('timeCurrent').textContent = '0:00';
+  }
+
+  function updateProgress() {
+    if (!isPlaying || !audioCtx) return;
+    const elapsed = audioCtx.currentTime - playStart;
+    const pct = Math.min(100, (elapsed / totalDur) * 100);
+    document.getElementById('progressFill').style.width = pct + '%';
+    document.getElementById('timeCurrent').textContent = formatTime(elapsed);
+    animFrame = requestAnimationFrame(updateProgress);
+  }
+
+  function formatTime(s) {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60).toString().padStart(2, '0');
+    return `${m}:${sec}`;
+  }
+
+  // ── MIDI download ─────────────────────────────────────────────────────────
+  function downloadMidi() {
+    if (!midiB64) return;
+    const bytes = Uint8Array.from(atob(midiB64), c => c.charCodeAt(0));
+    const blob = new Blob([bytes], { type: 'audio/midi' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `musicai_${lastResult.genre}_${Date.now()}.mid`;
+    a.click();
+  }
+
+  // ── Preprocessing info ────────────────────────────────────────────────────
+  async function loadPreprocessInfo() {
+    const genre = document.getElementById('genre').value;
+    setStatus('Loading preprocessing info…', 'loading');
+    try {
+      const res = await fetch(`${API}/preprocess`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ genre }),
+      });
+      const d = await res.json();
+      document.getElementById('preprocessInfo').innerHTML = `
+        <div class="info-box">
+          <h4>Preprocessing Pipeline — ${d.genre.toUpperCase()}</h4>
+          <ul>${d.preprocessing_steps.map(s => `<li>${s}</li>`).join('')}</ul>
+          <br>
+          <strong>Scale:</strong> ${d.scale} (${d.scale_notes.join(', ')})<br>
+          <strong>Simulated dataset:</strong> ${d.simulated_dataset_size.toLocaleString()} sequences<br>
+          <strong>Vocabulary size:</strong> ${d.vocabulary_size} tokens
+        </div>
+      `;
+      setStatus('Preprocessing info loaded', 'success');
+    } catch (err) {
+      setStatus('Error: ' + err.message, 'error');
+    }
+  }
+
+  // ── Model info ────────────────────────────────────────────────────────────
+  async function loadModelInfo() {
+    setStatus('Fetching model architecture…', 'loading');
+    try {
+      const res = await fetch(`${API}/model-info`);
+      const d = await res.json();
+      const arch = d.architecture, tr = d.training;
+      document.getElementById('modelContent').innerHTML = `
+        <div class="model-card">
+          <div class="model-block">
+            <h4>LSTM Architecture</h4>
+            ${Object.entries(arch).map(([k,v]) => `<div class="model-row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('')}
+          </div>
+          <div class="model-block">
+            <h4>Training Config</h4>
+            ${Object.entries(tr).map(([k,v]) => `<div class="model-row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('')}
+          </div>
+        </div>
+        <div class="info-box" style="margin-top:16px">
+          <h4>Alternative: GAN Architecture</h4>
+          ${d.alternative}. The Generator produces note sequences; the Discriminator learns to distinguish real MIDI from generated ones, pushing the generator toward realistic music.
+        </div>
+      `;
+      document.getElementById('modelPanel').style.display = '';
+      setStatus('Model architecture loaded', 'success');
+    } catch (err) {
+      setStatus('Error: ' + err.message, 'error');
+    }
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  loadGenres();
+</script>
+</body>
+</html>
+    
